@@ -184,12 +184,14 @@ def main():
             image_tensor = ToTensor()(image)
             writer.add_image('Synthetic_Data', image_tensor, epoch)
             
+            save_path = os.path.join(args.path_helper['ckpt_path'], f"checkpoint_{epoch}.pth")
             torch.save({
                 'epoch': epoch,
                 'gen_state_dict': gen_net.state_dict(),
                 'dis_state_dict': dis_net.state_dict(),
                 'gen_avg_param': gen_avg_param,
-            }, os.path.join(args.path_helper['ckpt_path'], f"checkpoint_{epoch}.pth"))
+            }, save_path)
+            print(f"Checkpoint saved to: {save_path}")
 
 if __name__ == '__main__':
     main()

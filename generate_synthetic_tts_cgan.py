@@ -13,7 +13,24 @@ def generate_and_restore(appliance, num_samples, seq_len=512, latent_dim=100):
     pkl_path = os.path.join(log_path, 'min_max_values.pkl')
     
     # Find the last checkpoint
-    ckpt_dir = os.path.join(log_path, 'checkpoints')
+    # Try both common naming conventions
+    possible_dirs = [
+        os.path.join(log_path, 'checkpoints'),
+        os.path.join(log_path, 'Model')
+    ]
+    
+    ckpt_dir = None
+    for d in possible_dirs:
+        if os.path.exists(d):
+            ckpt_dir = d
+            break
+            
+    if not ckpt_dir:
+        print(f"DEBUG: Searched in {possible_dirs}")
+        print(f"DEBUG: Current directory contents: {os.listdir(log_path) if os.path.exists(log_path) else 'Log dir not found'}")
+        raise FileNotFoundError(f"Could not find checkpoints or Model directory in {log_path}")
+        
+    print(f"Fetching models from: {ckpt_dir}")
     ckpts = [f for f in os.listdir(ckpt_dir) if f.endswith('.pth')]
     if not ckpts:
         print(f"No checkpoints found for {appliance}")
