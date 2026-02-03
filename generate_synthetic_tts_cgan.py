@@ -23,8 +23,14 @@ def generate_and_restore(appliance, num_samples, seq_len=512, latent_dim=100):
     print(f"Using log directory: {log_path}")
     
     pkl_path = os.path.join(log_path, 'min_max_values.pkl')
-    
-    # Find the last checkpoint
+    if not os.path.exists(pkl_path):
+        # Try checking in Log subfolder
+        pkl_path = os.path.join(log_path, 'Log', 'min_max_values.pkl')
+        
+    if not os.path.exists(pkl_path):
+        raise FileNotFoundError(f"Could not find min_max_values.pkl in {log_path} or its Log subfolder")
+        
+    print(f"Loading Min/Max from: {pkl_path}")
     # Try both common naming conventions
     possible_dirs = [
         os.path.join(log_path, 'checkpoints'),

@@ -163,8 +163,8 @@ def main():
     fixed_z = torch.randn(10, args.latent_dim).cuda()
     gen_avg_param = copy_params(gen_net)
     
-    os.makedirs(args.path_helper['log_path'], exist_ok=True)
-    with open(os.path.join(args.path_helper['log_path'], 'min_max_values.pkl'), 'wb') as f:
+    os.makedirs(args.path_helper['prefix'], exist_ok=True)
+    with open(os.path.join(args.path_helper['prefix'], 'min_max_values.pkl'), 'wb') as f:
         pickle.dump(dataset.min_max_values, f)
 
     writer_dict = {
