@@ -124,8 +124,9 @@ def train(args, gen_net: nn.Module, dis_net: nn.Module, gen_optimizer, dis_optim
         d_loss_gp = gradient_penalty(out_src, x_hat, args)
         
         # Total D loss
-        d_loss_adv = -torch.mean(r_out_adv) + torch.mean(f_out_adv) + args.lambda_gp * d_loss_gp
-        d_loss = d_loss_adv + args.lambda_cls * d_cls_loss
+        # Total D loss
+        d_loss_adv = -torch.mean(r_out_adv) + torch.mean(f_out_adv) + 10.0 * d_loss_gp
+        d_loss = d_loss_adv + 1.0 * d_cls_loss
 
         # Optimization
         dis_optimizer.zero_grad()
@@ -152,7 +153,7 @@ def train(args, gen_net: nn.Module, dis_net: nn.Module, gen_optimizer, dis_optim
             g_cls_loss = 0
             
         g_loss_adv = -torch.mean(g_out_adv)
-        g_loss = g_loss_adv + args.lambda_cls * g_cls_loss
+        g_loss = g_loss_adv + 1.0 * g_cls_loss
         g_loss.backward()
 
         torch.nn.utils.clip_grad_norm_(gen_net.parameters(), 5.)
