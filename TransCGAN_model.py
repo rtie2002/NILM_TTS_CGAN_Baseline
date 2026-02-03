@@ -69,6 +69,10 @@ class Generator(nn.Module):
         )
         
     def forward(self, z, labels, time_features):
+        # Ensure z is 2D (Batch, Latent)
+        if z.dim() > 2:
+            z = z.view(z.size(0), -1)
+            
         batch_size = z.shape[0]
         
         # 1. Expand Latent Noise: (B, Latent) -> (B, Seq, Latent)
