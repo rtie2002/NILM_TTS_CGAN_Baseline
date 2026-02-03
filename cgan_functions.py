@@ -167,9 +167,8 @@ def train(args, gen_net: nn.Module, dis_net: nn.Module, gen_optimizer, dis_optim
 
         # moving average weight
         for p, avg_p in zip(gen_net.parameters(), gen_avg_param):
-            cpu_p = deepcopy(p)
-            avg_p.mul_(ema_beta).add_(1. - ema_beta, cpu_p.cpu().data)
-            del cpu_p
+            # Move the model parameter to the same device as the average parameter (usually CPU)
+            avg_p.mul_(ema_beta).add_(p.data.to(avg_p.device), alpha=1. - ema_beta)
 
         writer.add_scalar('g_loss', g_loss.item(), global_steps) if args.rank == 0 else 0
         gen_step += 1
@@ -308,7 +307,7 @@ def load_params(model, new_param, args, mode="gpu"):
         for p, new_p in zip(model.parameters(), new_param):
             cpu_p = deepcopy(new_p)
 #             p.data.copy_(cpu_p.cuda().to(f"cuda:{args.gpu}"))
-            p.data.copy_(cpu_p.cuda().to("cpu"))
+            p.data.copy_(cpu_p.to("cpu")) # Fixed: Removed redundant .cuda() and ensured .to("cpu")
             del cpu_p
     
     else:
