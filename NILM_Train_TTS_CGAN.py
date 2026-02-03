@@ -39,7 +39,7 @@ class Args:
         self.appliances = [opt.appliance] # Only one appliance at a time
         
         self.seq_len = 512  
-        self.channels = 9   # 1 Power + 8 Time
+        self.channels = 1   # 🚀 Power only
         self.num_classes = 1 # Single class
         self.latent_dim = 100
         self.batch_size = opt.batch_size
@@ -53,11 +53,12 @@ class Args:
         self.gpu = opt.gpu
         self.exp_name = f'tts_cgan_nilm_{opt.appliance}_512'
         self.init_type = 'normal'
-        self.num_workers = 4 # 🚀 Speed up data loading
+        self.num_workers = 4 
         self.optimizer = 'adam'
         self.lr_decay = True
         self.max_iter = None
         self.show = True
+        self.ema = 0.99 # 🚀 Lower EMA to let model learn faster in 400 epochs
         self.dist_url = "env://"
         self.world_size = 1
         self.rank = 0
@@ -91,9 +92,9 @@ class NILMDataset(Dataset):
             print(f"Loading and Scaling {app}...")
             df = pd.read_csv(file_path)
             if len(df.columns) == 10:
-                vals = df.iloc[:, 1:].values 
+                vals = df.iloc[:, 1:2].values # 🚀 Only Column 1 (Power)
             else:
-                vals = df.values 
+                vals = df.iloc[:, 0:1].values 
                 
             d_min = vals.min(axis=0)
             d_max = vals.max(axis=0)
@@ -102,9 +103,9 @@ class NILMDataset(Dataset):
             vals = (vals - d_min) / (d_max - d_min + 1e-7)
             
             num_windows = len(vals) // seq_len
-            windows = vals[:num_windows * seq_len].reshape(-1, seq_len, 9)
+            windows = vals[:num_windows * seq_len].reshape(-1, seq_len, 1)
             
-            windows = windows.transpose(0, 2, 1) 
+            windows = windows.transpose(0, 2, 1) # (N, 1, 512)
             windows = windows[:, :, np.newaxis, :] 
             
             self.data.append(windows.astype(np.float32))

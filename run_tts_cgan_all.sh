@@ -4,8 +4,8 @@
 # This script trains each appliance one-by-one and generates 200% synthetic data.
 
 APPLIANCES=("dishwasher" "fridge" "kettle" "microwave" "washingmachine")
-EPOCHS=100
-BATCH_SIZE=128
+EPOCHS=400
+BATCH_SIZE=64
 SEQ_LEN=512
 
 for APP in "${APPLIANCES[@]}"

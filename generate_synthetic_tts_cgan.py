@@ -65,7 +65,7 @@ def generate_and_restore(appliance, num_samples, seq_len=512, latent_dim=100):
     
     # 3. Load Model
     checkpoint = torch.load(checkpoint_path)
-    gen_net = Generator(seq_len=seq_len, channels=9, num_classes=1, 
+    gen_net = Generator(seq_len=seq_len, channels=1, num_classes=1, 
                         latent_dim=latent_dim, data_embed_dim=128, label_embed_dim=128, 
                         depth=4, num_heads=8).cuda()
     
@@ -92,19 +92,38 @@ def generate_and_restore(appliance, num_samples, seq_len=512, latent_dim=100):
             z = torch.randn(cur_batch, latent_dim).cuda()
             labels = torch.zeros(cur_batch, dtype=torch.long).cuda()
             fake_imgs = gen_net(z, labels).cpu().numpy()
-            all_samples.append(fake_imgs)
+    samples = np.concatenate(all_samples, axis=0).squeeze(2) # (N, 1, 512)
     
-    samples = np.concatenate(all_samples, axis=0).squeeze(2) # (N, 9, 512)
-    
-    # 5. Restore
+    # 5. Restore Power and Stitch Time
     d_min, d_max = min_max_dict[appliance]
-    d_min = d_min.reshape(1, 9, 1)
-    d_max = d_max.reshape(1, 9, 1)
-    restored_samples = samples * (d_max - d_min + 1e-7) + d_min
-    restored_samples = restored_samples.transpose(0, 2, 1) # (N, 512, 9)
+    # In 1-channel mode, d_min/d_max are single values
+    # We'll denormalize the GAN output (channel 0)
+    samples_power = (samples * (d_max - d_min + 1e-7) + d_min)
+    
+    # 6. Load Original CSV for Time Feature Templates
+    csv_path = os.path.join(current_dir, 'data', f"{appliance}_training_.csv")
+    if os.path.exists(csv_path):
+        print(f"Sampling real time features from: {csv_path}")
+        df = pd.read_csv(csv_path)
+        # Assuming Columns 2-9 are the time features (minute_sin to month_cos)
+        real_time_data = df.iloc[:, 2:].values 
+        num_orig_windows = len(real_time_data) // seq_len
+        time_windows = real_time_data[:num_orig_windows * seq_len].reshape(-1, seq_len, 8)
+        
+        # Randomly sample time windows to match num_samples
+        idx = np.random.choice(num_orig_windows, num_samples, replace=True)
+        sampled_time = time_windows[idx].transpose(0, 2, 1) # (N, 8, 512)
+        
+        # Concatenate: Synth Power (N, 1, 512) + Real Time (N, 8, 512)
+        final_data = np.concatenate([samples_power, sampled_time], axis=1)
+        final_data = final_data.transpose(0, 2, 1) # (N, 512, 9)
+    else:
+        print("Warning: Original CSV not found for time stitching. Outputting only Power.")
+        final_data = samples_power.transpose(0, 2, 1) # (N, 512, 1)
     
     save_path = os.path.join(output_dir, f'{appliance}_synthetic_data.npy')
-    np.save(save_path, restored_samples)
+    np.save(save_path, final_data)
+    
     print(f"Successfully saved to {save_path}")
 
 if __name__ == "__main__":

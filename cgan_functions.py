@@ -86,7 +86,8 @@ def train(args, gen_net: nn.Module, dis_net: nn.Module, gen_optimizer, dis_optim
     gen_net.train()
     dis_net.train()
     
-    for iter_idx, (real_imgs, real_img_labels) in enumerate(tqdm(train_loader)):
+    pbar = tqdm(train_loader)
+    for iter_idx, (real_imgs, real_img_labels) in enumerate(pbar):
         global_steps = writer_dict['train_global_steps']
         
         # Adversarial ground truths
@@ -170,14 +171,13 @@ def train(args, gen_net: nn.Module, dis_net: nn.Module, gen_optimizer, dis_optim
             for p, avg_p in zip(gen_net.parameters(), gen_avg_param):
                 avg_p.mul_(ema_beta).add_(p.data, alpha=1. - ema_beta)
 
+        if args.rank == 0:
+            pbar.set_description(
+                f"Epoch {epoch}/{args.max_epoch} | D Loss: {d_loss.item():.4f} | G Loss: {g_loss.item():.4f} | EMA: {ema_beta:.4f}"
+            )
+
         writer.add_scalar('g_loss', g_loss.item(), global_steps) if args.rank == 0 else 0
         gen_step += 1
-
-        # verbose
-        if gen_step and iter_idx % args.print_freq == 0 and args.rank == 0:
-            tqdm.write(
-                "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f] [ema: %f] " %
-                (epoch, args.max_epoch, iter_idx % len(train_loader), len(train_loader), d_loss.item(), g_loss.item(), ema_beta))
 
         del gen_imgs
         del real_imgs
