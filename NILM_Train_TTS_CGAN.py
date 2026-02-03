@@ -177,7 +177,8 @@ def main():
         train(args, gen_net, dis_net, gen_optimizer, dis_optimizer, gen_avg_param, 
               train_loader, epoch, writer_dict, fixed_z, (gen_scheduler, dis_scheduler))
             
-        if epoch % 1 == 0:
+        # Save plot and checkpoint
+        if epoch % 5 == 0 or epoch == args.max_epoch - 1:
             plot_buf = gen_plot_nilm(gen_net, epoch, args)
             image = PIL.Image.open(plot_buf)
             image_tensor = ToTensor()(image)
