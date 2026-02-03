@@ -41,12 +41,10 @@ class Generator(nn.Module):
         self.depth = depth
         self.num_heads = num_heads
         
-        # 🚀 NEW: Project time features
-        self.time_proj = nn.Linear(self.time_dim * self.seq_len, self.label_embed_dim)
-        
-        # Combine noise + label + time
-        self.l1 = nn.Linear(self.latent_dim + self.label_embed_dim + self.label_embed_dim, 
-                           self.seq_len * self.data_embed_dim)
+        # 🚀 NEW: Point-wise input projection
+        # Input to Transformer will be: [z (expanded), c (expanded), time (point-wise)]
+        self.input_dim = self.latent_dim + self.label_embed_dim + self.time_dim
+        self.input_proj = nn.Linear(self.input_dim, self.data_embed_dim)
         
         # 🚀 NEW: Add Positional Encoding
         self.pos_encoder = PositionalEncoding(self.data_embed_dim, max_len=self.seq_len)
@@ -66,15 +64,26 @@ class Generator(nn.Module):
         )
         
     def forward(self, z, labels, time_features):
+        batch_size = z.shape[0]
+        
+        # 1. Expand Latent Noise: (B, Latent) -> (B, Seq, Latent)
+        z_expanded = z.unsqueeze(1).repeat(1, self.seq_len, 1)
+        
+        # 2. Expand Label Embedding: (B, LabelDim) -> (B, Seq, LabelDim)
         c = self.label_embedding(labels)
-        time_flat = time_features.view(time_features.size(0), -1)
-        t = self.time_proj(time_flat)
+        c_expanded = c.unsqueeze(1).repeat(1, self.seq_len, 1)
         
-        x = torch.cat([z, c, t], 1)
-        x = self.l1(x)
-        x = x.view(-1, self.seq_len, self.data_embed_dim)
+        # 3. Prepare Time Features: (B, 8, 1, 512) -> (B, 512, 8)
+        # We need to correctly reshape and permute to match sequence dim
+        t_seq = time_features.squeeze(2).permute(0, 2, 1) 
         
-        # 🚀 Apply Positional Encoding (Shape is [Seq, Batch, Feature] for PE usually, so we permute)
+        # 4. Concatenate Point-wise: (B, Seq, Latent + Label + Time)
+        x = torch.cat([z_expanded, c_expanded, t_seq], dim=2)
+        
+        # 5. Project to Embedding Dim
+        x = self.input_proj(x) # (B, Seq, Embed)
+        
+        # 🚀 Apply Positional Encoding
         x = x.permute(1, 0, 2) # (Seq, Batch, Feat)
         x = self.pos_encoder(x)
         x = x.permute(1, 0, 2) # Back to (Batch, Seq, Feat)
