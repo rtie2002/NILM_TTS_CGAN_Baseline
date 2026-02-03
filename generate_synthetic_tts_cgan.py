@@ -8,8 +8,20 @@ from TransCGAN_model import Generator
 def generate_and_restore(appliance, num_samples, seq_len=512, latent_dim=100):
     # 1. Path Setup
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    exp_name = f'tts_cgan_nilm_{appliance}_512'
-    log_path = os.path.join(current_dir, 'logs', exp_name)
+    # Find the log directory (handle timestamps)
+    base_name = f'tts_cgan_nilm_{appliance}_512'
+    log_parent = os.path.join(current_dir, 'logs')
+    
+    # List all dirs starting with the base name
+    candidates = [d for d in os.listdir(log_parent) if d.startswith(base_name)]
+    if not candidates:
+        raise FileNotFoundError(f"No log directory found starting with {base_name} in {log_parent}")
+    
+    # Sort by modification time to get the latest one
+    candidates.sort(key=lambda x: os.path.getmtime(os.path.join(log_parent, x)), reverse=True)
+    log_path = os.path.join(log_parent, candidates[0])
+    print(f"Using log directory: {log_path}")
+    
     pkl_path = os.path.join(log_path, 'min_max_values.pkl')
     
     # Find the last checkpoint
