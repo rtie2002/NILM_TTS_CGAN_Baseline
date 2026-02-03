@@ -11,7 +11,7 @@ import torch.nn as nn
 from imageio import imsave
 from utils import make_grid, save_image
 from tqdm import tqdm
-import cv2
+# import cv2 (Not used for NILM task)
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +47,8 @@ def gradient_penalty(y, x, args):
                                retain_graph=True,
                                create_graph=True,
                                only_inputs=True)[0]
-
-    dydx = dydx.view(dydx.size(0), -1)
+    # Calculate gradient penalty
+    dydx = dydx.reshape(dydx.size(0), -1)
     dydx_l2norm = torch.sqrt(torch.sum(dydx**2, dim=1))
     return torch.mean((dydx_l2norm-1)**2)    
     
@@ -96,7 +96,7 @@ def train(args, gen_net: nn.Module, dis_net: nn.Module, gen_optimizer, dis_optim
         real_img_labels = real_img_labels.cuda(args.gpu, non_blocking=True)
 
         # Sample noise as generator input
-        noise = torch.cuda.FloatTensor(np.random.normal(0, 1, (real_imgs.shape[0], args.latent_dim))).cuda(args.gpu, non_blocking=True)
+        noise = torch.randn(real_imgs.shape[0], args.latent_dim, device=real_imgs.device)
         fake_img_labels = torch.randint(0, args.n_classes, (real_imgs.shape[0],)).cuda(args.gpu, non_blocking=True)
 
         # ---------------------
@@ -165,10 +165,10 @@ def train(args, gen_net: nn.Module, dis_net: nn.Module, gen_optimizer, dis_optim
         else:
             ema_beta = args.ema
 
-        # moving average weight (Optimized: No deepcopy)
-        with torch.no_grad():
-            for p, avg_p in zip(gen_net.parameters(), gen_avg_param):
-                avg_p.mul_(ema_beta).add_(p.data, alpha=1. - ema_beta)
+        # moving average weight
+        for p, avg_p in zip(gen_net.parameters(), gen_avg_param):
+            # Move the model parameter to the same device as the average parameter (usually CPU)
+            avg_p.mul_(ema_beta).add_(p.data.to(avg_p.device), alpha=1. - ema_beta)
 
         writer.add_scalar('g_loss', g_loss.item(), global_steps) if args.rank == 0 else 0
         gen_step += 1
@@ -307,7 +307,7 @@ def load_params(model, new_param, args, mode="gpu"):
         for p, new_p in zip(model.parameters(), new_param):
             cpu_p = deepcopy(new_p)
 #             p.data.copy_(cpu_p.cuda().to(f"cuda:{args.gpu}"))
-            p.data.copy_(cpu_p.cuda().to("cpu"))
+            p.data.copy_(cpu_p.to("cpu")) # Fixed: Removed redundant .cuda() and ensured .to("cpu")
             del cpu_p
     
     else:
@@ -315,5 +315,12 @@ def load_params(model, new_param, args, mode="gpu"):
             p.data.copy_(new_p)
 
 
-def copy_params(model):
-    return [p.data.clone().detach() for p in model.parameters()]
+def copy_params(model, mode='cpu'):
+    if mode == 'gpu':
+        flatten = []
+        for p in model.parameters():
+            cpu_p = deepcopy(p).cpu()
+            flatten.append(cpu_p.data)
+    else:
+        flatten = deepcopy(list(p.data for p in model.parameters()))
+    return flatten
