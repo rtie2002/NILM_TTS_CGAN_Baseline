@@ -105,31 +105,31 @@ def train(args, gen_net: nn.Module, dis_net: nn.Module, gen_optimizer, dis_optim
         
         dis_net.zero_grad()
         # 🚀 Discriminator sees Power + Time pairs
+        # Discriminator forward-pass
         r_out_adv, r_out_cls = dis_net(real_power, real_time)
-        
-        # 🚀 Generator conditioned on Time
         fake_power = gen_net(noise, fake_img_labels, real_time)
-        
-        assert fake_power.size() == real_power.size(), f"fake_power: {fake_power.size()} != real_power: {real_power.size()}"
-
         f_out_adv, f_out_cls = dis_net(fake_power, real_time)
+
+        # Compute classification loss (only if model supports it)
+        if r_out_cls is not None:
+            d_cls_loss = cls_criterion(r_out_cls, real_img_labels)
+        else:
+            d_cls_loss = 0
 
         # Gradient penalty
         alpha = torch.rand(real_power.size(0), 1, 1, 1).cuda(args.gpu, non_blocking=True)
+        # alpha = alpha.expand_as(real_power)
         x_hat = (alpha * real_power.data + (1 - alpha) * fake_power.data).requires_grad_(True)
-        out_src, _ = dis_net(x_hat, real_time)
+        out_src, _ = dis_net(x_hat, real_time) # Gradient penalty uses real_time
         d_loss_gp = gradient_penalty(out_src, x_hat, args)
         
-        d_real_loss = -torch.mean(r_out_adv)
-        d_fake_loss = torch.mean(f_out_adv)
-        d_adv_loss = d_real_loss + d_fake_loss 
-        
-        d_cls_loss = cls_criterion(r_out_cls, real_img_labels)
-        
-        d_loss = d_adv_loss + lambda_cls * d_cls_loss + lambda_gp * d_loss_gp
+        # Total D loss
+        d_loss_adv = -torch.mean(r_out_adv) + torch.mean(f_out_adv) + args.lambda_gp * d_loss_gp
+        d_loss = d_loss_adv + args.lambda_cls * d_cls_loss
+
+        # Optimization
+        dis_optimizer.zero_grad()
         d_loss.backward()
-        
-        torch.nn.utils.clip_grad_norm_(dis_net.parameters(), 5.)
         dis_optimizer.step()
 
         writer.add_scalar('d_loss', d_loss.item(), global_steps) if args.rank == 0 else 0
@@ -140,12 +140,19 @@ def train(args, gen_net: nn.Module, dis_net: nn.Module, gen_optimizer, dis_optim
         
         gen_net.zero_grad()
 
+        noise = torch.randn(args.batch_size, args.latent_dim).cuda(args.gpu, non_blocking=True).view(args.batch_size, args.latent_dim, 1, 1)
+        fake_img_labels = torch.randint(0, args.n_classes, (args.batch_size,)).cuda(args.gpu, non_blocking=True)
+        
         gen_power = gen_net(noise, fake_img_labels, real_time)
         g_out_adv, g_out_cls = dis_net(gen_power, real_time)
-
-        g_adv_loss = -torch.mean(g_out_adv)
-        g_cls_loss = cls_criterion(g_out_cls, fake_img_labels)    
-        g_loss = g_adv_loss + lambda_cls * g_cls_loss
+        
+        if g_out_cls is not None:
+            g_cls_loss = cls_criterion(g_out_cls, fake_img_labels)
+        else:
+            g_cls_loss = 0
+            
+        g_loss_adv = -torch.mean(g_out_adv)
+        g_loss = g_loss_adv + args.lambda_cls * g_cls_loss
         g_loss.backward()
 
         torch.nn.utils.clip_grad_norm_(gen_net.parameters(), 5.)
