@@ -23,7 +23,7 @@ class Args:
         self.dataset = 'NILM'
         # Scale to Data/datasets relative to this project
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        self.data_path = os.path.abspath(os.path.join(current_dir, '..', '..', 'Data', 'datasets'))
+        self.data_path = os.path.join(current_dir, 'data') # 🚀 Data now relative to repo root
         self.appliances = ["dishwasher", "fridge", "kettle", "microwave", "washingmachine"]
         self.seq_len = 512  
         self.channels = 9   # 1 Power + 8 Time
