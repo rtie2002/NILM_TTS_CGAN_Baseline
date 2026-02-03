@@ -91,7 +91,8 @@ def generate_and_restore(appliance, num_samples, seq_len=512, latent_dim=100):
     sampled_time_tensor = torch.from_numpy(sampled_time).float().cuda()
     
     # 5. Generate Power conditioned on Time
-    output_dir = os.path.join(current_dir, 'synthetic_out')
+    # 🚀 Unified output directory structure (matches Diffusion)
+    output_dir = os.path.join(current_dir, 'OUTPUT', f'{appliance}_multivariate')
     os.makedirs(output_dir, exist_ok=True)
     
     batch_size = 100
@@ -126,7 +127,8 @@ def generate_and_restore(appliance, num_samples, seq_len=512, latent_dim=100):
     final_data = np.concatenate([power_restored, time_samples], axis=1)  # (N, 9, 512)
     final_data = final_data.transpose(0, 2, 1)  # (N, 512, 9)
     
-    save_path = os.path.join(output_dir, f'{appliance}_synthetic_data.npy')
+    # 🚀 Unified filename format (matches Diffusion)
+    save_path = os.path.join(output_dir, f'cgan_fake_{appliance}_multivariate.npy')
     np.save(save_path, final_data)
     print(f"Successfully saved to {save_path}")
     print(f"Output shape: {final_data.shape}")
