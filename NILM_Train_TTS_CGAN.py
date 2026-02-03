@@ -134,6 +134,7 @@ def gen_plot_nilm(gen_net, epoch, args):
     plt.savefig(buf, format='jpeg')
     buf.seek(0)
     plt.close()
+    return buf
 
 def main():
     args = Args()

@@ -165,10 +165,10 @@ def train(args, gen_net: nn.Module, dis_net: nn.Module, gen_optimizer, dis_optim
         else:
             ema_beta = args.ema
 
-        # moving average weight
-        for p, avg_p in zip(gen_net.parameters(), gen_avg_param):
-            # Move the model parameter to the same device as the average parameter (usually CPU)
-            avg_p.mul_(ema_beta).add_(p.data.to(avg_p.device), alpha=1. - ema_beta)
+        # moving average weight (Optimized for 4090 Speed)
+        with torch.no_grad():
+            for p, avg_p in zip(gen_net.parameters(), gen_avg_param):
+                avg_p.mul_(ema_beta).add_(p.data, alpha=1. - ema_beta)
 
         writer.add_scalar('g_loss', g_loss.item(), global_steps) if args.rank == 0 else 0
         gen_step += 1
