@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
+import matplotlib
+matplotlib.use('Agg') # 🚀 Fix: Prevent Tkinter thread crashes
 import matplotlib.pyplot as plt
 import io
 import PIL.Image
