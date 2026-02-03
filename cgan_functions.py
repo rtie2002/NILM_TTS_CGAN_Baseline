@@ -47,8 +47,8 @@ def gradient_penalty(y, x, args):
                                retain_graph=True,
                                create_graph=True,
                                only_inputs=True)[0]
-
-    dydx = dydx.view(dydx.size(0), -1)
+    # Calculate gradient penalty
+    dydx = dydx.reshape(dydx.size(0), -1)
     dydx_l2norm = torch.sqrt(torch.sum(dydx**2, dim=1))
     return torch.mean((dydx_l2norm-1)**2)    
     
@@ -96,7 +96,7 @@ def train(args, gen_net: nn.Module, dis_net: nn.Module, gen_optimizer, dis_optim
         real_img_labels = real_img_labels.cuda(args.gpu, non_blocking=True)
 
         # Sample noise as generator input
-        noise = torch.cuda.FloatTensor(np.random.normal(0, 1, (real_imgs.shape[0], args.latent_dim))).cuda(args.gpu, non_blocking=True)
+        noise = torch.randn(real_imgs.shape[0], args.latent_dim, device=real_imgs.device)
         fake_img_labels = torch.randint(0, 5, (real_imgs.shape[0],)).cuda(args.gpu, non_blocking=True)
 
         # ---------------------
