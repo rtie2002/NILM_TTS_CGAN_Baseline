@@ -59,8 +59,13 @@ class Generator(nn.Module):
                  forward_drop_p=forward_drop_rate
                 )
 
+        # 🚀 CRITICAL FIX: Use Conv1d with large kernel to enforce smoothness
+        # Previous 1x1 Conv caused independent "spikes". 
+        # Kernel=9 acts as a smoothing filter, mixing neighbors.
         self.deconv = nn.Sequential(
-            nn.Conv2d(self.data_embed_dim, self.channels, 1, 1, 0)
+            nn.Conv1d(self.data_embed_dim, self.data_embed_dim, kernel_size=9, padding=4),
+            nn.LeakyReLU(0.2),
+            nn.Conv1d(self.data_embed_dim, self.channels, kernel_size=1)
         )
         
     def forward(self, z, labels, time_features):
@@ -89,8 +94,16 @@ class Generator(nn.Module):
         x = x.permute(1, 0, 2) # Back to (Batch, Seq, Feat)
         
         x = self.blocks(x)
-        x = x.reshape(x.shape[0], 1, x.shape[1], x.shape[2])
-        output = self.deconv(x.permute(0, 3, 1, 2))
+        # x is (Batch, Seq, Embed)
+        
+        # 🚀 Transpose for Conv1d: (Batch, Embed, Seq)
+        x = x.permute(0, 2, 1)
+        
+        output = self.deconv(x)
+        
+        # Reshape to (Batch, 1, 1, Seq) to match original expected output format
+        output = output.unsqueeze(2) 
+        
         return torch.sigmoid(output)
 
 
