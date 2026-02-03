@@ -97,7 +97,7 @@ def train(args, gen_net: nn.Module, dis_net: nn.Module, gen_optimizer, dis_optim
 
         # Sample noise as generator input
         noise = torch.randn(real_imgs.shape[0], args.latent_dim, device=real_imgs.device)
-        fake_img_labels = torch.randint(0, 5, (real_imgs.shape[0],)).cuda(args.gpu, non_blocking=True)
+        fake_img_labels = torch.randint(0, args.n_classes, (real_imgs.shape[0],)).cuda(args.gpu, non_blocking=True)
 
         # ---------------------
         #  Train Discriminator
