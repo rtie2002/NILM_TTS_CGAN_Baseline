@@ -253,36 +253,47 @@ class PatchEmbedding_Linear(nn.Module):
 
         
 class Discriminator(nn.Module):
-    def __init__(self, 
-                 in_channels=9,  # 🚀 1 Power + 8 Time
-                 patch_size=15,
-                 data_emb_size=50,
-                 label_emb_size=10,
-                 seq_length = 150,
-                 depth=3, 
-                 n_classes=9, 
-                 **kwargs):
-        super().__init__()
+    def __init__(self, in_channels=9, seq_length=512, **kwargs):
+        super(Discriminator, self).__init__()
         
-        # Original pipeline expects 9 channels (Power + Time concatenated)
-        self.patch_embed = PatchEmbedding_Linear(in_channels, patch_size, data_emb_size, seq_length)
-        self.encoder = Dis_TransformerEncoder(depth, emb_size=data_emb_size, drop_p=0.5, forward_drop_p=0.5, **kwargs)
-        self.head = ClassificationHead(data_emb_size, 1, n_classes)
+        # 🚀 TCN Discriminator: Scrutinizes every detail using Convolution
+        # No more patches, no more hiding spikes!
+        
+        self.main = nn.Sequential(
+            # Input: (B, 9, 512)
+            nn.Conv1d(in_channels, 64, kernel_size=4, stride=2, padding=1),
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            # (B, 64, 256)
+            nn.Conv1d(64, 128, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm1d(128),
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            # (B, 128, 128)
+            nn.Conv1d(128, 256, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm1d(256),
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            # (B, 256, 64)
+            nn.Conv1d(256, 512, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm1d(512),
+            nn.LeakyReLU(0.2, inplace=True),
+            
+            # (B, 512, 32)
+            nn.Conv1d(512, 1, kernel_size=32, stride=1, padding=0),
+            # Output: (B, 1, 1) -> Scalar Score
+        )
         
     def forward(self, power, time_features):
-        """
-        Args:
-            power: (batch, 1, 1, 512) - Generated or Real Power
-            time_features: (batch, 8, 1, 512) - Time conditioning
-        Returns:
-            out_adv: (batch, 1) - Real/Fake score
-            out_cls: (batch, n_classes) - Class logits
-        """
-        # 🚀 Concatenate Power + Time
-        x = torch.cat([power, time_features], dim=1)  # (batch, 9, 1, 512)
+        # Flatten input: Power (B, 1, 1, 512) -> (B, 1, 512)
+        p = power.squeeze(2) 
+        # Time (B, 8, 1, 512) -> (B, 8, 512)
+        t = time_features.squeeze(2)
         
-        # Pass through original pipeline
-        x = self.patch_embed(x)
-        x = self.encoder(x)
-        out_adv, out_cls = self.head(x)
-        return out_adv, out_cls
+        # Concatenate: (B, 9, 512)
+        x = torch.cat([p, t], dim=1)
+        
+        output = self.main(x)
+        
+        # Return score (B, 1) and None (no class logits needed for WGAN-GP)
+        return output.view(-1, 1), None
