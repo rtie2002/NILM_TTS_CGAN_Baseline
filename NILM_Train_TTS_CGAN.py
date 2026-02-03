@@ -161,8 +161,9 @@ def main():
     
     gen_net = Generator(seq_len=args.seq_len, channels=args.channels, num_classes=args.num_classes, 
                         latent_dim=args.latent_dim, data_embed_dim=128, label_embed_dim=128, 
-                        depth=4, num_heads=8).cuda()
-    dis_net = Discriminator(in_channels=args.channels, patch_size=16, data_emb_size=128, label_emb_size=128,
+                        depth=4, num_heads=8, time_dim=8).cuda()
+    # 🚀 Discriminator receives 9 channels (1 Power + 8 Time)
+    dis_net = Discriminator(in_channels=9, patch_size=16, data_emb_size=128, label_emb_size=128,
                             seq_length=args.seq_len, depth=4, n_classes=args.num_classes, num_heads=8).cuda()
     
     dataset = NILMDataset(args.data_path, args.appliances, args.seq_len)
