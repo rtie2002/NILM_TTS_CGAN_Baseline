@@ -5,7 +5,7 @@
 
 APPLIANCES=("dishwasher" "fridge" "kettle" "microwave" "washingmachine")
 EPOCHS=100
-BATCH_SIZE=128
+BATCH_SIZE=256
 SEQ_LEN=512
 
 for APP in "${APPLIANCES[@]}"
