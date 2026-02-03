@@ -87,35 +87,37 @@ def train(args, gen_net: nn.Module, dis_net: nn.Module, gen_optimizer, dis_optim
     dis_net.train()
     
     pbar = tqdm(train_loader)
-    for iter_idx, (real_imgs, real_img_labels) in enumerate(pbar):
+    for iter_idx, (real_power, real_time, real_img_labels) in enumerate(pbar):
         global_steps = writer_dict['train_global_steps']
         
-        # Adversarial ground truths
-        real_imgs = real_imgs.type(torch.cuda.FloatTensor).cuda(args.gpu, non_blocking=True)
-#         real_img_labels = real_img_labels.type(torch.IntTensor)
-        real_img_labels = real_img_labels.type(torch.LongTensor)
-        real_img_labels = real_img_labels.cuda(args.gpu, non_blocking=True)
+        # Move to GPU
+        real_power = real_power.type(torch.cuda.FloatTensor).cuda(args.gpu, non_blocking=True)
+        real_time = real_time.type(torch.cuda.FloatTensor).cuda(args.gpu, non_blocking=True)
+        real_img_labels = real_img_labels.type(torch.LongTensor).cuda(args.gpu, non_blocking=True)
 
-        # Sample noise as generator input
-        noise = torch.randn(real_imgs.shape[0], args.latent_dim, device=real_imgs.device)
-        fake_img_labels = torch.randint(0, args.n_classes, (real_imgs.shape[0],)).cuda(args.gpu, non_blocking=True)
+        # Sample noise
+        noise = torch.randn(real_power.shape[0], args.latent_dim, device=real_power.device)
+        fake_img_labels = torch.randint(0, args.n_classes, (real_power.shape[0],)).cuda(args.gpu, non_blocking=True)
 
         # ---------------------
         #  Train Discriminator
         # ---------------------
         
         dis_net.zero_grad()
-        r_out_adv, r_out_cls = dis_net(real_imgs)
-        fake_imgs = gen_net(noise, fake_img_labels)
+        # 🚀 Discriminator sees Power + Time pairs
+        r_out_adv, r_out_cls = dis_net(real_power, real_time)
         
-        assert fake_imgs.size() == real_imgs.size(), f"fake_imgs.size(): {fake_imgs.size()} real_imgs.size(): {real_imgs.size()}"
+        # 🚀 Generator conditioned on Time
+        fake_power = gen_net(noise, fake_img_labels, real_time)
+        
+        assert fake_power.size() == real_power.size(), f"fake_power: {fake_power.size()} != real_power: {real_power.size()}"
 
-        f_out_adv, f_out_cls = dis_net(fake_imgs)
+        f_out_adv, f_out_cls = dis_net(fake_power, real_time)
 
-        # Compute loss for gradient penalty.
-        alpha = torch.rand(real_imgs.size(0), 1, 1, 1).cuda(args.gpu, non_blocking=True)  # bh, C, H, W
-        x_hat = (alpha * real_imgs.data + (1 - alpha) * fake_imgs.data).requires_grad_(True)
-        out_src, _ = dis_net(x_hat)
+        # Gradient penalty
+        alpha = torch.rand(real_power.size(0), 1, 1, 1).cuda(args.gpu, non_blocking=True)
+        x_hat = (alpha * real_power.data + (1 - alpha) * fake_power.data).requires_grad_(True)
+        out_src, _ = dis_net(x_hat, real_time)
         d_loss_gp = gradient_penalty(out_src, x_hat, args)
         
         d_real_loss = -torch.mean(r_out_adv)
@@ -138,8 +140,8 @@ def train(args, gen_net: nn.Module, dis_net: nn.Module, gen_optimizer, dis_optim
         
         gen_net.zero_grad()
 
-        gen_imgs = gen_net(noise, fake_img_labels)
-        g_out_adv, g_out_cls = dis_net(gen_imgs)
+        gen_power = gen_net(noise, fake_img_labels, real_time)
+        g_out_adv, g_out_cls = dis_net(gen_power, real_time)
 
         g_adv_loss = -torch.mean(g_out_adv)
         g_cls_loss = cls_criterion(g_out_cls, fake_img_labels)    
@@ -179,9 +181,9 @@ def train(args, gen_net: nn.Module, dis_net: nn.Module, gen_optimizer, dis_optim
         writer.add_scalar('g_loss', g_loss.item(), global_steps) if args.rank == 0 else 0
         gen_step += 1
 
-        del gen_imgs
-        del real_imgs
-        del fake_imgs
+        del gen_power
+        del real_power
+        del fake_power
         del f_out_adv
         del r_out_adv
         del r_out_cls

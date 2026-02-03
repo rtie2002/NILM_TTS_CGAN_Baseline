@@ -39,7 +39,7 @@ class Args:
         self.appliances = [opt.appliance] # Only one appliance at a time
         
         self.seq_len = 512  
-        self.channels = 1   # 🚀 Power only
+        self.channels = 1   # 🚀 Power ONLY (Focus Mode)
         self.num_classes = 1 # Single class
         self.latent_dim = 100
         self.batch_size = opt.batch_size
@@ -58,7 +58,7 @@ class Args:
         self.lr_decay = True
         self.max_iter = None
         self.show = True
-        self.ema = 0.99 # 🚀 Lower EMA to let model learn faster in 400 epochs
+        self.ema = 0.99 # 🚀 Let model learn faster
         self.dist_url = "env://"
         self.world_size = 1
         self.rank = 0
@@ -70,7 +70,6 @@ class Args:
         self.wd = 1e-3
         self.phi = 1
         self.n_classes = 1
-        self.ema = 0.999
         self.ema_kimg = 500
         self.ema_warmup = 0
         self.dis_batch_size = opt.batch_size
@@ -79,7 +78,8 @@ class Args:
 
 class NILMDataset(Dataset):
     def __init__(self, data_root, appliances, seq_len=512):
-        self.data = []
+        self.power_data = []  # 🚀 Target: Power
+        self.time_data = []   # 🚀 Condition: Time features
         self.labels = []
         self.min_max_values = {} 
         
@@ -92,41 +92,57 @@ class NILMDataset(Dataset):
             print(f"Loading and Scaling {app}...")
             df = pd.read_csv(file_path)
             if len(df.columns) == 10:
-                vals = df.iloc[:, 1:2].values # 🚀 Only Column 1 (Power)
+                vals = df.iloc[:, 1:].values # 🚀 All 9 columns
             else:
-                vals = df.iloc[:, 0:1].values 
+                vals = df.values
                 
-            d_min = vals.min(axis=0)
-            d_max = vals.max(axis=0)
+            # Split into Power (ch 0) and Time (ch 1-8)
+            power_vals = vals[:, 0:1]  # Shape: (T, 1)
+            time_vals = vals[:, 1:]    # Shape: (T, 8)
+            
+            # Normalize Power to [0, 1]
+            d_min = power_vals.min(axis=0)
+            d_max = power_vals.max(axis=0)
             self.min_max_values[app] = (d_min, d_max) 
+            power_normalized = (power_vals - d_min) / (d_max - d_min + 1e-7)
             
-            vals = (vals - d_min) / (d_max - d_min + 1e-7)
-            
+            # Create windows
             num_windows = len(vals) // seq_len
-            windows = vals[:num_windows * seq_len].reshape(-1, seq_len, 1)
+            power_windows = power_normalized[:num_windows * seq_len].reshape(-1, seq_len, 1)
+            time_windows = time_vals[:num_windows * seq_len].reshape(-1, seq_len, 8)
             
-            windows = windows.transpose(0, 2, 1) # (N, 1, 512)
-            windows = windows[:, :, np.newaxis, :] 
+            # Transpose to (N, C, T)
+            power_windows = power_windows.transpose(0, 2, 1)  # (N, 1, 512)
+            time_windows = time_windows.transpose(0, 2, 1)    # (N, 8, 512)
             
-            self.data.append(windows.astype(np.float32))
+            # Add channel dimension for Conv2D
+            power_windows = power_windows[:, :, np.newaxis, :]  # (N, 1, 1, 512)
+            time_windows = time_windows[:, :, np.newaxis, :]    # (N, 8, 1, 512)
+            
+            self.power_data.append(power_windows.astype(np.float32))
+            self.time_data.append(time_windows.astype(np.float32))
             self.labels.append(np.full((num_windows,), idx, dtype=np.int64))
             
-        self.data = np.concatenate(self.data, axis=0)
+        self.power_data = np.concatenate(self.power_data, axis=0)
+        self.time_data = np.concatenate(self.time_data, axis=0)
         self.labels = np.concatenate(self.labels, axis=0)
-        print(f"Total dataset size: {len(self.data)} windows.")
+        print(f"Total dataset: {len(self.power_data)} windows.")
+        print(f"Power shape: {self.power_data.shape}, Time shape: {self.time_data.shape}")
 
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, idx):
-        return self.data[idx], self.labels[idx]
+        return self.power_data[idx], self.time_data[idx], self.labels[idx]
 
 def gen_plot_nilm(gen_net, epoch, args):
     gen_net.eval()
     with torch.no_grad():
         fake_noise = torch.randn(1, args.latent_dim).cuda()
-        fake_label = torch.zeros(1, dtype=torch.long).cuda() # Always 0 for single class
-        fake_sig = gen_net(fake_noise, fake_label).cpu().numpy()
+        fake_label = torch.zeros(1, dtype=torch.long).cuda()
+        # 🚀 Create dummy time features (all zeros, or use real samples)
+        fake_time = torch.zeros(1, 8, 1, 512).cuda()
+        fake_sig = gen_net(fake_noise, fake_label, fake_time).cpu().numpy()
 
     fig, ax = plt.subplots(figsize=(6, 5))
     fig.suptitle(f'NILM {args.target_app} at epoch {epoch}', fontsize=16)

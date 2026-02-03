@@ -11,22 +11,28 @@ from einops.layers.torch import Rearrange, Reduce
 from torchsummary import summary
 
 class Generator(nn.Module):
-    def __init__(self, seq_len=150, channels=3, num_classes=9, latent_dim=100, data_embed_dim=10, 
-                label_embed_dim=10 ,depth=3, num_heads=5, 
-                forward_drop_rate=0.5, attn_drop_rate=0.5):
+    def __init__(self, seq_len=150, channels=1, num_classes=9, latent_dim=100, data_embed_dim=10, 
+                label_embed_dim=10, depth=3, num_heads=5, 
+                forward_drop_rate=0.5, attn_drop_rate=0.5, time_dim=8):
         super(Generator, self).__init__()
         self.seq_len = seq_len
-        self.channels = channels
+        self.channels = channels  # 🚀 Now outputs 1 channel (Power)
         self.num_classes = num_classes
         self.latent_dim = latent_dim
         self.data_embed_dim = data_embed_dim
         self.label_embed_dim = label_embed_dim
+        self.time_dim = time_dim  # 🚀 NEW: 8 time features
         self.depth = depth
         self.num_heads = num_heads
         self.attn_drop_rate = attn_drop_rate
         self.forward_drop_rate = forward_drop_rate
         
-        self.l1 = nn.Linear(self.latent_dim + self.label_embed_dim, self.seq_len * self.data_embed_dim)
+        # 🚀 NEW: Project time features (8, 512) to embedding space
+        self.time_proj = nn.Linear(self.time_dim * self.seq_len, self.label_embed_dim)
+        
+        # Combine noise + label + time
+        self.l1 = nn.Linear(self.latent_dim + self.label_embed_dim + self.label_embed_dim, 
+                           self.seq_len * self.data_embed_dim)
         self.label_embedding = nn.Embedding(self.num_classes, self.label_embed_dim) 
         
         self.blocks = Gen_TransformerEncoder(
@@ -41,9 +47,24 @@ class Generator(nn.Module):
             nn.Conv2d(self.data_embed_dim, self.channels, 1, 1, 0)
         )
         
-    def forward(self, z, labels):
-        c = self.label_embedding(labels)
-        x = torch.cat([z, c], 1)
+    def forward(self, z, labels, time_features):
+        """
+        Args:
+            z: (batch, latent_dim) - Random noise
+            labels: (batch,) - Class labels (not used in single-class case)
+            time_features: (batch, 8, 1, 512) - Time conditioning
+        Returns:
+            output: (batch, 1, 1, 512) - Generated Power
+        """
+        # Process label embedding
+        c = self.label_embedding(labels)  # (batch, label_embed_dim)
+        
+        # 🚀 Process time features
+        time_flat = time_features.view(time_features.size(0), -1)  # (batch, 8*512)
+        t = self.time_proj(time_flat)  # (batch, label_embed_dim)
+        
+        # Concatenate all conditions
+        x = torch.cat([z, c, t], 1)  # (batch, latent + 2*label_embed)
         x = self.l1(x)
         x = x.view(-1, self.seq_len, self.data_embed_dim)
         H, W = 1, self.seq_len
@@ -94,7 +115,7 @@ class MultiHeadAttention(nn.Module):
         queries = rearrange(self.queries(x), "b n (h d) -> b h n d", h=self.num_heads)
         keys = rearrange(self.keys(x), "b n (h d) -> b h n d", h=self.num_heads)
         values = rearrange(self.values(x), "b n (h d) -> b h n d", h=self.num_heads)
-        energy = torch.einsum('bhqd, bhkd -> bhqk', queries, keys)  # batch, num_heads, query_len, key_len
+        energy = torch.einsum('bhqd, bhkd -> bhqk', queries, keys)
         if mask is not None:
             fill_value = torch.finfo(torch.float32).min
             energy.mask_fill(~mask, fill_value)
@@ -181,7 +202,6 @@ class ClassificationHead(nn.Sequential):
 class PatchEmbedding_Linear(nn.Module):
     def __init__(self, in_channels = 21, patch_size = 16, emb_size = 100, seq_length = 1024):
         super().__init__()
-        #change the conv2d parameters here
         self.projection = nn.Sequential(
             Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)',s1 = 1, s2 = patch_size),
             nn.Linear(patch_size*in_channels, emb_size)
@@ -194,18 +214,14 @@ class PatchEmbedding_Linear(nn.Module):
         b, _, _, _ = x.shape
         x = self.projection(x)
         cls_tokens = repeat(self.cls_token, '() n e -> b n e', b=b)
-        #prepend the cls token to the input
         x = torch.cat([cls_tokens, x], dim=1)
-        # position
         x += self.positions
         return x    
-'''
 
-'''        
         
-class Discriminator(nn.Sequential):
+class Discriminator(nn.Module):
     def __init__(self, 
-                 in_channels=3,
+                 in_channels=9,  # 🚀 1 Power + 8 Time
                  patch_size=15,
                  data_emb_size=50,
                  label_emb_size=10,
@@ -213,9 +229,27 @@ class Discriminator(nn.Sequential):
                  depth=3, 
                  n_classes=9, 
                  **kwargs):
-        super().__init__(
-            PatchEmbedding_Linear(in_channels, patch_size, data_emb_size, seq_length),
-            Dis_TransformerEncoder(depth, emb_size=data_emb_size, drop_p=0.5, forward_drop_p=0.5, **kwargs),
-            ClassificationHead(data_emb_size, 1, n_classes)
-        )
+        super().__init__()
         
+        # Original pipeline expects 9 channels (Power + Time concatenated)
+        self.patch_embed = PatchEmbedding_Linear(in_channels, patch_size, data_emb_size, seq_length)
+        self.encoder = Dis_TransformerEncoder(depth, emb_size=data_emb_size, drop_p=0.5, forward_drop_p=0.5, **kwargs)
+        self.head = ClassificationHead(data_emb_size, 1, n_classes)
+        
+    def forward(self, power, time_features):
+        """
+        Args:
+            power: (batch, 1, 1, 512) - Generated or Real Power
+            time_features: (batch, 8, 1, 512) - Time conditioning
+        Returns:
+            out_adv: (batch, 1) - Real/Fake score
+            out_cls: (batch, n_classes) - Class logits
+        """
+        # 🚀 Concatenate Power + Time
+        x = torch.cat([power, time_features], dim=1)  # (batch, 9, 1, 512)
+        
+        # Pass through original pipeline
+        x = self.patch_embed(x)
+        x = self.encoder(x)
+        out_adv, out_cls = self.head(x)
+        return out_adv, out_cls
