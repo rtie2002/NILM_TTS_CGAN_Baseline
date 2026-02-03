@@ -100,10 +100,22 @@ class NILMDataset(Dataset):
             power_vals = vals[:, 0:1]  # Shape: (T, 1)
             time_vals = vals[:, 1:]    # Shape: (T, 8)
             
-            # Normalize Power to [0, 1]
-            d_min = power_vals.min(axis=0)
-            d_max = power_vals.max(axis=0)
-            self.min_max_values[app] = (d_min, d_max) 
+            # 🚀 Robust Scaling: Clip outliers before Normalization to avoid squashing signal
+            # We use 99.5% quantile as max to cut off extreme Z-score spikes
+            p_low = np.percentile(power_vals, 0)   # Min is usually fine (OFF state)
+            p_high = np.percentile(power_vals, 99.5) # Clip top 0.5% outliers
+            
+            print(f"  > Original Range: [{power_vals.min():.2f}, {power_vals.max():.2f}]")
+            print(f"  > Default Clipping: [{p_low:.2f}, {p_high:.2f}]")
+            
+            power_vals = np.clip(power_vals, p_low, p_high)
+            
+            # Normalize Power to [0, 1] based on clipped range
+            d_min = p_low
+            d_max = p_high
+            # Note: We store the clipped min/max for restoration
+            self.min_max_values[app] = (np.array([d_min]), np.array([d_max])) 
+            
             power_normalized = (power_vals - d_min) / (d_max - d_min + 1e-7)
             
             # Create windows

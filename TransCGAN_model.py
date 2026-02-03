@@ -10,37 +10,55 @@ from einops import rearrange, reduce, repeat
 from einops.layers.torch import Rearrange, Reduce
 from torchsummary import summary
 
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, dropout=0.1, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        x = x + self.pe[:x.size(0), :]
+        return self.dropout(x)
+
 class Generator(nn.Module):
     def __init__(self, seq_len=150, channels=1, num_classes=9, latent_dim=100, data_embed_dim=10, 
                 label_embed_dim=10, depth=3, num_heads=5, 
                 forward_drop_rate=0.5, attn_drop_rate=0.5, time_dim=8):
         super(Generator, self).__init__()
         self.seq_len = seq_len
-        self.channels = channels  # 🚀 Now outputs 1 channel (Power)
+        self.channels = channels
         self.num_classes = num_classes
         self.latent_dim = latent_dim
         self.data_embed_dim = data_embed_dim
         self.label_embed_dim = label_embed_dim
-        self.time_dim = time_dim  # 🚀 NEW: 8 time features
+        self.time_dim = time_dim
         self.depth = depth
         self.num_heads = num_heads
-        self.attn_drop_rate = attn_drop_rate
-        self.forward_drop_rate = forward_drop_rate
         
-        # 🚀 NEW: Project time features (8, 512) to embedding space
+        # 🚀 NEW: Project time features
         self.time_proj = nn.Linear(self.time_dim * self.seq_len, self.label_embed_dim)
         
         # Combine noise + label + time
         self.l1 = nn.Linear(self.latent_dim + self.label_embed_dim + self.label_embed_dim, 
                            self.seq_len * self.data_embed_dim)
+        
+        # 🚀 NEW: Add Positional Encoding
+        self.pos_encoder = PositionalEncoding(self.data_embed_dim, max_len=self.seq_len)
+        
         self.label_embedding = nn.Embedding(self.num_classes, self.label_embed_dim) 
         
         self.blocks = Gen_TransformerEncoder(
                  depth=self.depth,
                  emb_size = self.data_embed_dim,
                  num_heads = self.num_heads,
-                 drop_p = self.attn_drop_rate,
-                 forward_drop_p=self.forward_drop_rate
+                 drop_p = attn_drop_rate,
+                 forward_drop_p=forward_drop_rate
                 )
 
         self.deconv = nn.Sequential(
@@ -48,30 +66,23 @@ class Generator(nn.Module):
         )
         
     def forward(self, z, labels, time_features):
-        """
-        Args:
-            z: (batch, latent_dim) - Random noise
-            labels: (batch,) - Class labels (not used in single-class case)
-            time_features: (batch, 8, 1, 512) - Time conditioning
-        Returns:
-            output: (batch, 1, 1, 512) - Generated Power
-        """
-        # Process label embedding
-        c = self.label_embedding(labels)  # (batch, label_embed_dim)
+        c = self.label_embedding(labels)
+        time_flat = time_features.view(time_features.size(0), -1)
+        t = self.time_proj(time_flat)
         
-        # 🚀 Process time features
-        time_flat = time_features.view(time_features.size(0), -1)  # (batch, 8*512)
-        t = self.time_proj(time_flat)  # (batch, label_embed_dim)
-        
-        # Concatenate all conditions
-        x = torch.cat([z, c, t], 1)  # (batch, latent + 2*label_embed)
+        x = torch.cat([z, c, t], 1)
         x = self.l1(x)
         x = x.view(-1, self.seq_len, self.data_embed_dim)
-        H, W = 1, self.seq_len
+        
+        # 🚀 Apply Positional Encoding (Shape is [Seq, Batch, Feature] for PE usually, so we permute)
+        x = x.permute(1, 0, 2) # (Seq, Batch, Feat)
+        x = self.pos_encoder(x)
+        x = x.permute(1, 0, 2) # Back to (Batch, Seq, Feat)
+        
         x = self.blocks(x)
         x = x.reshape(x.shape[0], 1, x.shape[1], x.shape[2])
         output = self.deconv(x.permute(0, 3, 1, 2))
-        return output 
+        return torch.sigmoid(output)
 
 
 class Gen_TransformerEncoderBlock(nn.Sequential):
