@@ -16,31 +16,42 @@ from utils import set_log_dir, create_logger
 from copy import deepcopy
 import pickle
 
+import argparse
+
 # Configuration
 class Args:
     def __init__(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--appliance', type=str, default='fridge', help='Appliance to train on')
+        parser.add_argument('--batch_size', type=int, default=256, help='Batch size for training')
+        parser.add_argument('--epochs', type=int, default=100, help='Max epochs')
+        parser.add_argument('--gpu', type=int, default=0, help='GPU ID')
+        opt, _ = parser.parse_known_args()
+
         self.random_seed = 123
         self.dataset = 'NILM'
         # Scale to Data/datasets relative to this project
         current_dir = os.path.dirname(os.path.abspath(__file__))
         self.data_path = os.path.join(current_dir, 'data') # 🚀 Data now relative to repo root
-        self.appliances = ["dishwasher", "fridge", "kettle", "microwave", "washingmachine"]
+        self.target_app = opt.appliance
+        self.appliances = [opt.appliance] # Only one appliance at a time
+        
         self.seq_len = 512  
         self.channels = 9   # 1 Power + 8 Time
-        self.num_classes = 5
+        self.num_classes = 1 # Single class
         self.latent_dim = 100
-        self.batch_size = 256  # Optimized for 4090
-        self.max_epoch = 100
+        self.batch_size = opt.batch_size
+        self.max_epoch = opt.epochs
         self.g_lr = 0.0001
         self.d_lr = 0.0001
         self.beta1 = 0.5
         self.beta2 = 0.9
         self.n_critic = 1
         self.val_freq = 5
-        self.gpu = 0
-        self.exp_name = 'tts_cgan_nilm_512'
+        self.gpu = opt.gpu
+        self.exp_name = f'tts_cgan_nilm_{opt.appliance}_512'
         self.init_type = 'normal'
-        self.num_workers = 0
+        self.num_workers = 4 # 🚀 Speed up data loading
         self.optimizer = 'adam'
         self.lr_decay = True
         self.max_iter = None
@@ -55,11 +66,11 @@ class Args:
         self.path_helper = None
         self.wd = 1e-3
         self.phi = 1
-        self.n_classes = 5
+        self.n_classes = 1
         self.ema = 0.999
         self.ema_kimg = 500
         self.ema_warmup = 0
-        self.dis_batch_size = 256
+        self.dis_batch_size = opt.batch_size
         self.print_freq = 50
         self.grow_steps = [0, 0] 
 
@@ -109,29 +120,20 @@ class NILMDataset(Dataset):
 
 def gen_plot_nilm(gen_net, epoch, args):
     gen_net.eval()
-    synthetic_data = [] 
-    synthetic_labels = []
-    
     with torch.no_grad():
-        for idx in range(5): 
-            fake_noise = torch.randn(1, args.latent_dim).cuda()
-            fake_label = torch.full((1,), idx, dtype=torch.long).cuda()
-            fake_sigs = gen_net(fake_noise, fake_label).cpu().numpy()
-            synthetic_data.append(fake_sigs)
-            synthetic_labels.append(idx)
+        fake_noise = torch.randn(1, args.latent_dim).cuda()
+        fake_label = torch.zeros(1, dtype=torch.long).cuda() # Always 0 for single class
+        fake_sig = gen_net(fake_noise, fake_label).cpu().numpy()
 
-    fig, axs = plt.subplots(1, 5, figsize=(25, 5))
-    fig.suptitle(f'NILM Synthetic Power (Channel 0) at epoch {epoch}', fontsize=20)
-    for i in range(5):
-        axs[i].plot(synthetic_data[i][0, 0, 0, :], color='blue')
-        axs[i].set_title(f"App: {args.appliances[i]}")
-        axs[i].set_ylim([-0.1, 1.1]) 
+    fig, ax = plt.subplots(figsize=(6, 5))
+    fig.suptitle(f'NILM {args.target_app} at epoch {epoch}', fontsize=16)
+    ax.plot(fake_sig[0, 0, 0, :], color='blue')
+    ax.set_ylim([-0.1, 1.1]) 
     
     buf = io.BytesIO()
     plt.savefig(buf, format='jpeg')
     buf.seek(0)
     plt.close()
-    return buf
 
 def main():
     args = Args()
@@ -144,7 +146,8 @@ def main():
                             seq_length=args.seq_len, depth=4, n_classes=args.num_classes, num_heads=8).cuda()
     
     dataset = NILMDataset(args.data_path, args.appliances, args.seq_len)
-    train_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
+    train_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, 
+                              num_workers=args.num_workers, pin_memory=True) # 🚀 Faster RAM->GPU
     
     gen_optimizer = torch.optim.Adam(gen_net.parameters(), lr=args.g_lr, betas=(args.beta1, args.beta2))
     dis_optimizer = torch.optim.Adam(dis_net.parameters(), lr=args.d_lr, betas=(args.beta1, args.beta2))
